@@ -1,49 +1,42 @@
-# V Menu — Pie / Radial Menu for IngeTrazo
+# V Menu for IngeTrazo
 
-Sleek, fast circular tool menu (Pie / Radial Menu) for the **IngeTrazo** 3D CAD/BIM modeler.
+Radial (pie) menu extension for the [IngeTrazo](https://github.com/IngeTrazo/IngeTrazo) 3D CAD/BIM modeler.
 
----
+Pressing **`V`** opens a 10-tool circular menu directly under the cursor.
 
-## How to Use
+<p align="center">
+  <img src="ss_dark.png" alt="V Menu Dark Theme" width="48%" />
+  <img src="ss_light.png" alt="V Menu Light Theme" width="48%" />
+</p>
 
-1. Launch IngeTrazo.
-2. Press **`V`** on your keyboard (anywhere in the viewport or window).
-3. A 10-slice radial menu appears directly under your cursor.
-4. Move your mouse over the desired tool (the slice highlights in IngeTrazo orange) and click.
-5. The menu automatically closes and the selected tool is immediately active!
+## Usage
 
-> [!TIP]
-> - You can dismiss the menu without picking a tool by pressing **`V`** again, pressing **`Esc`**, or **right-clicking**.
-
----
-
-## Tool Layout (Clockwise from North / 12:00)
-
-| # | Slice Position | Tool | Key | Description |
-| :-: | :--- | :--- | :--- | :--- |
-| **1** | **North (12:00)** | **Push/Pull** | `P` | Extrude and push/pull faces into 3D geometry |
-| **2** | **North-East (01:12)** | **Move** | `M` | Move selected geometry or objects |
-| **3** | **East-North-East (02:24)** | **Rotate** | `Q` | Rotate geometry around an axis |
-| **4** | **East-South-East (03:36)** | **Scale** | `S` | Scale selected geometry |
-| **5** | **South-East (04:48)** | **Offset** | `F` | Offset edges and contours |
-| **6** | **South (06:00)** | **Delete** | `Del` | Delete selected entities (one Undo step) |
-| **7** | **South-West (07:12)** | **Line** | `L` | Draw straight lines and edges |
-| **8** | **West-South-West (08:24)** | **Rectangle** | `R` | Draw planar rectangular faces |
-| **9** | **West-North-West (09:36)** | **Circle** | `C` | Draw circular faces and polygons |
-| **10** | **North-North-West (10:48)** | **Tape Measure** | `T` | Measure distances and create guides |
-
----
-
-## Customizing Tools
-
-At the top of [`__init__.py`](file:///c:/Users/shrek/kDrive/KOOD/Google%20Antigravity/IngeT%20menu/__init__.py), you will find the `PIE_ITEMS` list. You can easily add, remove, or swap tools.
-
----
+1. Press **`V`** anywhere in the viewport or window.
+2. Hover over a tool and left-click to select it.
+3. Left-click the **center hub** to toggle Clean Screen mode (`Ctrl+0`).
+4. To cancel, press **`Esc`**, press **`V`** again, or right-click.
 
 ## Installation
 
-Create a directory junction into your IngeTrazo plugins directory:
+Clone the repository into your IngeTrazo plugins folder:
+
 ```powershell
-New-Item -ItemType Junction -Path (Join-Path $env:APPDATA "ingetrazo\plugins\v_menu") -Target "c:\Users\shrek\kDrive\KOOD\Google Antigravity\IngeT menu"
+cd "$env:APPDATA\ingetrazo\plugins"
+git clone https://github.com/priit123/ingetrazo-v-menu.git v_menu
 ```
-Then restart IngeTrazo.
+
+Or link an existing folder using a junction:
+
+```powershell
+New-Item -ItemType Junction -Path (Join-Path $env:APPDATA "ingetrazo\plugins\v_menu") -Target "C:\Path\To\ingetrazo-v-menu"
+```
+
+Restart IngeTrazo to load the plugin.
+
+## Customization
+
+The tool list can be customized by editing `PIE_ITEMS` in `__init__.py`.
+
+## License
+
+GPL-3.0-or-later
