@@ -18,20 +18,14 @@ Pressing **`V`** opens a 10-tool circular menu directly under the cursor.
 
 ## Installation
 
-Clone the repository into your IngeTrazo plugins folder:
-
-```powershell
-cd "$env:APPDATA\ingetrazo\plugins"
-git clone https://github.com/priit123/ingetrazo-v-menu.git v_menu
-```
-
-Or link an existing folder using a junction:
-
-```powershell
-New-Item -ItemType Junction -Path (Join-Path $env:APPDATA "ingetrazo\plugins\v_menu") -Target "C:\Path\To\ingetrazo-v-menu"
-```
-
-Restart IngeTrazo to load the plugin.
+1. Download the `.zip` archive from the [Releases](https://github.com/priit123/ingetrazo-v-menu/releases) page.
+2. In IngeTrazo, go to: **Extensions ▸ Open plugins folder**
+   - Alternatively navigate manually:
+     - **Windows:** `%APPDATA%\ingetrazo\plugins\`
+     - **Linux:** `~/.local/share/ingetrazo/plugins/`
+     - **macOS:** `~/Library/Application Support/ingetrazo/plugins/`
+3. Extract the zip into that folder (as a `v_menu` folder).
+4. Restart IngeTrazo.
 
 ## Customization
 
