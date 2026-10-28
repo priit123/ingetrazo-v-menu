@@ -1,0 +1,4 @@
+.agents/
+__pycache__/
+docs/
+context.md

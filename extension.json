@@ -1,0 +1,8 @@
+{
+  "id": "v_menu",
+  "name": "V Menu (Pie Menu)",
+  "version": "0.1",
+  "description": "Pressing 'V' opens a 10-slice circular radial menu under the cursor with core tools (Push/Pull, Move, Rotate, Scale, Offset, Delete, Line, Rectangle, Circle, Tape Measure).",
+  "author": "priit123",
+  "entry": "__init__.py"
+}
