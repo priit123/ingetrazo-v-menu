@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     QKeyEvent,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
 )
 from PySide6.QtWidgets import (
@@ -138,7 +139,6 @@ def _is_dark_theme() -> bool:
     app = QApplication.instance()
     if app is None:
         return True
-    from PySide6.QtGui import QPalette
     bg = app.palette().color(QPalette.ColorRole.Window)
     return bg.lightness() < 128
 
@@ -226,13 +226,61 @@ class PieMenuWidget(QWidget):
         self._hovered_index = -1
         self._icons: dict[str, QIcon] = {}
 
+        # Cached drawing resources & precomputed sector geometry
+        self._cached_fonts = {
+            "title": QFont("Segoe UI", 8, QFont.Bold),
+            "sub": QFont("Segoe UI", 7),
+        }
+        self._sector_paths: list[QPainterPath] = []
+        self._icon_centers: list[QPointF] = []
+        self._icon_rects: list[QRectF] = []
+
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setMouseTracking(True)
         self.resize(TOTAL_SIZE, TOTAL_SIZE)
 
+        # Precompute geometry once
+        self._precompute_geometry()
+
         # Load native IngeTrazo icons
         self._load_app_icons()
+
+    def _precompute_geometry(self):
+        """Precompute QPainterPath sectors and icon positioning vectors."""
+        cx = TOTAL_SIZE / 2.0
+        cy = TOTAL_SIZE / 2.0
+        rect_out = QRectF(cx - OUTER_RADIUS, cy - OUTER_RADIUS, OUTER_RADIUS * 2, OUTER_RADIUS * 2)
+        rect_in = QRectF(cx - INNER_RADIUS, cy - INNER_RADIUS, INNER_RADIUS * 2, INNER_RADIUS * 2)
+        r_icon = (INNER_RADIUS + OUTER_RADIUS) / 2.0
+
+        self._sector_paths.clear()
+        self._icon_centers.clear()
+        self._icon_rects.clear()
+
+        for i, item in enumerate(self.items):
+            mid_deg = i * self.slice_angle
+            start_deg_math = 90.0 - (mid_deg - self.slice_angle / 2.0)
+            span_deg_math = -self.slice_angle
+
+            # Sector geometry path
+            path = QPainterPath()
+            path.arcMoveTo(rect_out, start_deg_math)
+            path.arcTo(rect_out, start_deg_math, span_deg_math)
+            path.arcTo(rect_in, start_deg_math + span_deg_math, -span_deg_math)
+            path.closeSubpath()
+            self._sector_paths.append(path)
+
+            # Icon center & bounding rect
+            rad = math.radians(mid_deg - 90.0)
+            icon_cx = cx + r_icon * math.cos(rad)
+            icon_cy = cy + r_icon * math.sin(rad)
+            center_pt = QPointF(icon_cx, icon_cy)
+            self._icon_centers.append(center_pt)
+
+            icon_size = 18 if item["key"] == "delete" else 24.0
+            rect = QRectF(icon_cx - icon_size / 2.0, icon_cy - icon_size / 2.0, icon_size, icon_size)
+            self._icon_rects.append(rect)
 
     def _load_app_icons(self):
         """Retrieve official QIcons from IngeTrazo tool actions.
@@ -390,59 +438,33 @@ class PieMenuWidget(QWidget):
         cy = self.height() / 2.0
         center = QPointF(cx, cy)
 
-        # 1. Draw each sector wedge
+        # 1. Draw each sector wedge (using precomputed paths and geometries)
+        pen_hover = QPen(QColor(255, 255, 255, 120), 1.5)
+        pen_normal = QPen(pal["border"], 1.0)
+        brush_hover = QBrush(pal["hover"])
+        brush_normal = QBrush(pal["bg"])
+
         for i, item in enumerate(self.items):
             is_hover = (i == self._hovered_index)
 
-            # Qt angle system: 0 is at 3 o'clock (East), positive is counter-clockwise.
-            # Convert so 0 is North (Top), increasing clockwise:
-            mid_deg = i * self.slice_angle
-            start_deg_math = 90.0 - (mid_deg - self.slice_angle / 2.0)
-            span_deg_math = -self.slice_angle
-
-            # Sector geometry path
-            path = QPainterPath()
-            rect_out = QRectF(cx - OUTER_RADIUS, cy - OUTER_RADIUS, OUTER_RADIUS * 2, OUTER_RADIUS * 2)
-            rect_in = QRectF(cx - INNER_RADIUS, cy - INNER_RADIUS, INNER_RADIUS * 2, INNER_RADIUS * 2)
-
-            path.arcMoveTo(rect_out, start_deg_math)
-            path.arcTo(rect_out, start_deg_math, span_deg_math)
-            path.arcTo(rect_in, start_deg_math + span_deg_math, -span_deg_math)
-            path.closeSubpath()
-
             # Fill and border
-            if is_hover:
-                painter.setPen(QPen(QColor(255, 255, 255, 120), 1.5))
-                painter.setBrush(QBrush(pal["hover"]))
-            else:
-                painter.setPen(QPen(pal["border"], 1.0))
-                painter.setBrush(QBrush(pal["bg"]))
+            painter.setPen(pen_hover if is_hover else pen_normal)
+            painter.setBrush(brush_hover if is_hover else brush_normal)
+            painter.drawPath(self._sector_paths[i])
 
-            painter.drawPath(path)
-
-            # Sector content — icon centred in the wedge (midpoint between inner and outer radius)
-            rad = math.radians(mid_deg - 90.0)
-            cos_rad = math.cos(rad)
-            sin_rad = math.sin(rad)
-
-            # Icon position: visual midpoint of the wedge band
-            r_icon = (INNER_RADIUS + OUTER_RADIUS) / 2.0
-            icon_cx = cx + r_icon * cos_rad
-            icon_cy = cy + r_icon * sin_rad
-
-            # Delete icon is drawn smaller
-            icon_size = 18 if item["key"] == "delete" else 24.0
-            icon_rect = QRectF(icon_cx - icon_size / 2.0, icon_cy - icon_size / 2.0, icon_size, icon_size)
-
+            # Sector content — icon using precomputed positions
+            center_pt = self._icon_centers[i]
+            icon_rect = self._icon_rects[i]
             icon_color = pal["text_hover"] if is_hover else pal["text"]
+
             if item["key"] == "delete":
-                _draw_delete_icon(painter, QPointF(icon_cx, icon_cy), icon_size, icon_color)
+                _draw_delete_icon(painter, center_pt, icon_rect.width(), icon_color)
             else:
                 icon = self._icons.get(item["key"])
                 if icon and not icon.isNull():
                     icon.paint(painter, icon_rect.toRect(), Qt.AlignCenter)
                 else:
-                    _draw_fallback_icon(painter, QPointF(icon_cx, icon_cy), icon_size, icon_color)
+                    _draw_fallback_icon(painter, center_pt, icon_rect.width(), icon_color)
 
         # 2. Center hub circle (clean, neutral border without highlight)
         painter.setPen(QPen(pal["border"], 1.5))
@@ -450,22 +472,25 @@ class PieMenuWidget(QWidget):
         painter.drawEllipse(center, INNER_RADIUS, INNER_RADIUS)
 
         # 3. Center hub text
+        font_title = self._cached_fonts["title"]
+        font_sub = self._cached_fonts["sub"]
+
         if 0 <= self._hovered_index < self.num_items:
             active_item = self.items[self._hovered_index]
-            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            painter.setFont(font_title)
             painter.setPen(pal["text_hover"])
             painter.drawText(QRectF(cx - 40, cy - 14, 80, 14), Qt.AlignCenter, active_item["name"])
 
-            painter.setFont(QFont("Segoe UI", 7))
+            painter.setFont(font_sub)
             painter.setPen(QColor(243, 115, 41))
             painter.drawText(QRectF(cx - 40, cy + 1, 80, 14), Qt.AlignCenter, f"Key: {active_item['shortcut']}")
         else:
             # Default center text — immediate Clean Screen action hint
-            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            painter.setFont(font_title)
             painter.setPen(QColor(243, 115, 41))
             painter.drawText(QRectF(cx - 42, cy - 14, 84, 14), Qt.AlignCenter, "Clean Screen")
 
-            painter.setFont(QFont("Segoe UI", 7))
+            painter.setFont(font_sub)
             painter.setPen(pal["text_dim"])
             painter.drawText(QRectF(cx - 42, cy + 1, 84, 14), Qt.AlignCenter, "Ctrl+0")
 
