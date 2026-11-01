@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import logging
 import math
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QCursor,
     QFont,
     QIcon,
+    QKeyEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -51,61 +52,70 @@ PIE_ITEMS = [
         "key": "pushpull",
         "name": "Push/Pull",
         "shortcut": "P",
+        "qt_key": Qt.Key_P,
         "desc": "Push or pull faces into 3D geometry",
     },
     {
         "key": "move",
         "name": "Move",
         "shortcut": "M",
+        "qt_key": Qt.Key_M,
         "desc": "Move selected geometry or objects",
     },
     {
         "key": "rotate",
         "name": "Rotate",
         "shortcut": "Q",
+        "qt_key": Qt.Key_Q,
         "desc": "Rotate geometry around an axis",
     },
     {
         "key": "scale",
         "name": "Scale",
         "shortcut": "S",
+        "qt_key": Qt.Key_S,
         "desc": "Scale selected geometry",
     },
     {
         "key": "offset",
         "name": "Offset",
         "shortcut": "F",
+        "qt_key": Qt.Key_F,
         "desc": "Offset edges and contours",
     },
     {
         "key": "delete",
         "name": "Delete",
         "shortcut": "Del",
+        "qt_key": Qt.Key_Delete,
         "desc": "Delete selected entities",
-        "is_action": True,
     },
     {
         "key": "line",
         "name": "Line",
         "shortcut": "L",
+        "qt_key": Qt.Key_L,
         "desc": "Draw straight lines and edges",
     },
     {
         "key": "rectangle",
         "name": "Rectangle",
         "shortcut": "R",
+        "qt_key": Qt.Key_R,
         "desc": "Draw planar rectangular faces",
     },
     {
         "key": "circle",
         "name": "Circle",
         "shortcut": "C",
+        "qt_key": Qt.Key_C,
         "desc": "Draw circular faces and polygons",
     },
     {
         "key": "tape",
         "name": "Tape Measure",
         "shortcut": "T",
+        "qt_key": Qt.Key_T,
         "desc": "Measure distances and create guides",
     },
 ]
@@ -225,7 +235,13 @@ class PieMenuWidget(QWidget):
         self._load_app_icons()
 
     def _load_app_icons(self):
-        """Retrieve official QIcons from IngeTrazo tool actions."""
+        """Retrieve official QIcons from IngeTrazo tool actions.
+
+        NOTE: win._tool_actions is a private IngeTrazo internal used here
+        only for icon loading. A public app.get_tool_icon() API has been
+        requested in the IngeTrazo issue tracker. This call is read-only
+        and fails silently — icons fall back to vector rendering if absent.
+        """
         tool_actions = getattr(self.win, "_tool_actions", {}) or {}
         for item in self.items:
             key = item["key"]
@@ -277,14 +293,20 @@ class PieMenuWidget(QWidget):
             dist = math.hypot(pos.x() - cx, pos.y() - cy)
 
             if dist < INNER_RADIUS:
-                # Center click toggles Clean Screen (Fullscreen)
-                self._trigger_clean_screen()
+                # Center click toggles Clean Screen (Ctrl+0)
                 self.close()
+                self._trigger_clean_screen()
                 return
 
+            item_to_activate = None
             if 0 <= self._hovered_index < self.num_items:
-                self._activate_item(self.items[self._hovered_index])
+                item_to_activate = self.items[self._hovered_index]
+
+            # Close first so focus returns to the viewport before the key event
             self.close()
+            if item_to_activate is not None:
+                QTimer.singleShot(0, lambda: self._activate_item(item_to_activate))
+
         elif event.button() == Qt.RightButton:
             # Right click cancels and closes menu
             self.close()
@@ -306,54 +328,33 @@ class PieMenuWidget(QWidget):
     # --- Tool Execution ---
 
     def _activate_item(self, item: dict):
-        """Activate selected IngeTrazo tool or command."""
-        key = item["key"]
+        """Activate the selected tool by simulating its keyboard shortcut.
+
+        Uses QKeyEvent sent to the viewport — public Qt API, no IngeTrazo
+        internals. Mirrors exactly what the user would press on the keyboard.
+        """
         name = item["name"]
+        qt_key = item["qt_key"]
+        shortcut = item["shortcut"]
+        # Only single-character shortcuts produce a text character
+        shortcut_text = shortcut if len(shortcut) == 1 else ""
 
-        # 1. Delete selection
-        if key == "delete":
-            fn = getattr(self.win, "_on_delete_selection", None)
-            if callable(fn):
-                fn()
-            else:
-                self.win.viewport.scene.delete_selection()
-                self.win.viewport.update()
-            self._flash(f"Deleted: {name}")
-            return
+        vp = getattr(self.win, "viewport", None)
+        target = vp if vp is not None else self.win
 
-        # 2. Standard interactive tools (Push/Pull, Move, Rotate, etc.)
-        tool_actions = getattr(self.win, "_tool_actions", {}) or {}
-        act = tool_actions.get(key)
-        if act is not None:
-            act.trigger()
-            self._flash(f"Active tool: {name}")
-            return
-
-        # 3. Fallback: direct _activate_tool invocation
-        fn = getattr(self.win, "_activate_tool", None)
-        if callable(fn):
-            fn(key)
-            self._flash(f"Active tool: {name}")
-        else:
-            log.warning("Could not find tool with key: %s", key)
+        press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
+        release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
+        QApplication.sendEvent(target, press)
+        QApplication.sendEvent(target, release)
+        self._flash(f"Active tool: {name}")
 
     def _trigger_clean_screen(self):
-        """Toggle Clean Screen mode (AutoCAD/IngeTrazo Ctrl+0 full presentation view)."""
-        clean_act = getattr(self.win, "_act_clean_screen", None)
-        if clean_act is not None:
-            clean_act.toggle()
-            is_clean = clean_act.isChecked()
-            self._flash(f"Clean Screen: {'ON' if is_clean else 'OFF'}")
-            return
-
-        # Fallback to direct method call if action not found
-        fn = getattr(self.win, "_toggle_clean_screen", None)
-        if callable(fn):
-            current_state = bool(getattr(self.win, "_clean_screen_state", None))
-            fn(not current_state)
-            self._flash(f"Clean Screen: {'OFF' if current_state else 'ON'}")
-        else:
-            log.warning("Clean Screen action/method not found on MainWindow")
+        """Toggle Clean Screen via Ctrl+0 key simulation (public Qt API)."""
+        press = QKeyEvent(QEvent.KeyPress, Qt.Key_0, Qt.ControlModifier, "0")
+        release = QKeyEvent(QEvent.KeyRelease, Qt.Key_0, Qt.ControlModifier, "0")
+        QApplication.sendEvent(self.win, press)
+        QApplication.sendEvent(self.win, release)
+        self._flash("Clean Screen toggled")
 
     def _flash(self, message: str):
         vp = getattr(self.win, "viewport", None)
@@ -542,22 +543,58 @@ class VPieMenuTool(Tool):
 
 
 def setup(app):
-    """Extension initialization hook. Installs global event filter."""
+    """Extension initialization hook. Installs key event filter on viewport only."""
     global _KEY_FILTER
     win = app.window
 
     _KEY_FILTER = PieMenuKeyFilter(win)
     win._v_menu_key_filter = _KEY_FILTER
 
-    # 1. Install filter on 3D Viewport
+    # Install filter on the 3D viewport only — avoids capturing V across
+    # the whole application and conflicting with other extensions.
     vp = getattr(app, "viewport", None) or getattr(win, "viewport", None)
     if vp is not None:
         vp.installEventFilter(_KEY_FILTER)
+    else:
+        # Viewport not available at load time — fall back to window scope
+        win.installEventFilter(_KEY_FILTER)
+        log.warning("V Menu: viewport not found; event filter installed on main window.")
 
-    # 2. Install filter on main window and application event loop
-    win.installEventFilter(_KEY_FILTER)
-    q_app = QApplication.instance()
-    if q_app is not None:
-        q_app.installEventFilter(_KEY_FILTER)
+    log.info("V Menu loaded. Press 'V' in the 3D viewport to open the menu.")
 
-    log.info("V Menu (Pie Menu) loaded successfully. Shortcut: 'V'.")
+
+def teardown(app):
+    """Extension teardown hook. Removes event filter and closes menu.
+
+    Called by IngeTrazo when the extension is disabled or unloaded.
+    Ensures no filter or state lingers until the next restart.
+    """
+    global _KEY_FILTER, _PIE_MENU_INSTANCE
+    win = app.window
+
+    # Close menu immediately if it is open
+    if _PIE_MENU_INSTANCE is not None:
+        try:
+            _PIE_MENU_INSTANCE.close()
+        except RuntimeError:
+            pass  # Widget already destroyed
+        _PIE_MENU_INSTANCE = None
+
+    # Remove event filter from all possible targets (no-op if not installed)
+    if _KEY_FILTER is not None:
+        vp = getattr(app, "viewport", None) or getattr(win, "viewport", None)
+        if vp is not None:
+            vp.removeEventFilter(_KEY_FILTER)
+        win.removeEventFilter(_KEY_FILTER)
+        q_app = QApplication.instance()
+        if q_app is not None:
+            q_app.removeEventFilter(_KEY_FILTER)
+        _KEY_FILTER = None
+
+    # Remove the attribute that was stamped onto the window
+    try:
+        del win._v_menu_key_filter
+    except AttributeError:
+        pass
+
+    log.info("V Menu unloaded.")
