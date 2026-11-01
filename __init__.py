@@ -378,21 +378,36 @@ class PieMenuWidget(QWidget):
     def _activate_item(self, item: dict):
         """Activate the selected tool by simulating its keyboard shortcut.
 
-        Uses QKeyEvent sent to the viewport — public Qt API, no IngeTrazo
-        internals. Mirrors exactly what the user would press on the keyboard.
+        Uses QKeyEvent — public Qt API, no IngeTrazo internals.
+        For 'delete', the event is sent directly to the 3D viewport with focus restored.
+        For tool shortcuts, it is sent to the main window where QActions reside.
         """
         name = item["name"]
         qt_key = item["qt_key"]
         shortcut = item["shortcut"]
-        # Only single-character shortcuts produce a text character
         shortcut_text = shortcut if len(shortcut) == 1 else ""
 
         vp = getattr(self.win, "viewport", None)
-        target = self.win  # QAction shortcuts are registered on the window, not viewport
+
+        if item.get("key") == "delete":
+            # Delete is handled directly by Viewport's keyPressEvent
+            target = vp if vp is not None else self.win
+            if vp is not None and hasattr(vp, "setFocus"):
+                vp.setFocus()
+        else:
+            # Tool shortcuts (P, M, Q, S, etc.) are QActions on the main window
+            target = self.win if self.win is not None else vp
+
         press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
         release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
-        QApplication.sendEvent(target, press)
-        QApplication.sendEvent(target, release)
+        if target is not None:
+            QApplication.sendEvent(target, press)
+            QApplication.sendEvent(target, release)
+
+        # Restore focus to viewport so modeling can continue immediately
+        if vp is not None and hasattr(vp, "setFocus"):
+            vp.setFocus()
+
         self._flash(f"Active tool: {name}")
 
     def _trigger_clean_screen(self):
