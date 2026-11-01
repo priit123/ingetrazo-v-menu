@@ -295,7 +295,7 @@ class PieMenuWidget(QWidget):
             if dist < INNER_RADIUS:
                 # Center click toggles Clean Screen (Ctrl+0)
                 self.close()
-                self._trigger_clean_screen()
+                QTimer.singleShot(0, self._trigger_clean_screen)
                 return
 
             item_to_activate = None
@@ -340,8 +340,7 @@ class PieMenuWidget(QWidget):
         shortcut_text = shortcut if len(shortcut) == 1 else ""
 
         vp = getattr(self.win, "viewport", None)
-        target = vp if vp is not None else self.win
-
+        target = self.win  # QAction shortcuts are registered on the window, not viewport
         press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
         release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
         QApplication.sendEvent(target, press)
@@ -349,12 +348,25 @@ class PieMenuWidget(QWidget):
         self._flash(f"Active tool: {name}")
 
     def _trigger_clean_screen(self):
-        """Toggle Clean Screen via Ctrl+0 key simulation (public Qt API)."""
+        """Toggle Clean Screen via public QAction lookup or key simulation."""
+        # 1. Preferred public Qt API: find Clean Screen QAction on the window
+        if self.win:
+            for action in self.win.actions():
+                sc = action.shortcut().toString()
+                text = action.text().lower()
+                if sc in ("Ctrl+0", "Ctrl+Num+0") or "clean" in text:
+                    action.trigger()
+                    self._flash("Clean Screen toggled")
+                    return
+
+        # 2. Fallback: simulate Ctrl+0 key event
         press = QKeyEvent(QEvent.KeyPress, Qt.Key_0, Qt.ControlModifier, "0")
         release = QKeyEvent(QEvent.KeyRelease, Qt.Key_0, Qt.ControlModifier, "0")
-        QApplication.sendEvent(self.win, press)
-        QApplication.sendEvent(self.win, release)
-        self._flash("Clean Screen toggled")
+        target = self.win if self.win else QApplication.activeWindow()
+        if target:
+            QApplication.sendEvent(target, press)
+            QApplication.sendEvent(target, release)
+            self._flash("Clean Screen toggled")
 
     def _flash(self, message: str):
         vp = getattr(self.win, "viewport", None)
