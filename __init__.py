@@ -21,12 +21,14 @@ import logging
 import math
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
+    QAction,
     QBrush,
     QColor,
     QCursor,
     QFont,
     QIcon,
     QKeyEvent,
+    QKeySequence,
     QPainter,
     QPainterPath,
     QPalette,
@@ -376,16 +378,16 @@ class PieMenuWidget(QWidget):
     # --- Tool Execution ---
 
     def _activate_item(self, item: dict):
-        """Activate the selected tool by simulating its keyboard shortcut.
+        """Activate the selected tool using public Qt APIs.
 
-        Uses QKeyEvent — public Qt API, no IngeTrazo internals.
-        For 'delete', the event is sent directly to the 3D viewport with focus restored.
-        For tool shortcuts, it is sent to the main window where QActions reside.
+        1. For 'delete', directly targets the viewport via Key_Delete.
+        2. For regular tools, first attempts to trigger the corresponding QAction
+           (works even when toolbars are hidden in Clean Screen mode).
+        3. Falls back to sending simulated QKeyEvent if no matching QAction is found.
         """
         name = item["name"]
         qt_key = item["qt_key"]
         shortcut = item["shortcut"]
-        shortcut_text = shortcut if len(shortcut) == 1 else ""
 
         vp = getattr(self.win, "viewport", None)
 
@@ -394,15 +396,37 @@ class PieMenuWidget(QWidget):
             target = vp if vp is not None else self.win
             if vp is not None and hasattr(vp, "setFocus"):
                 vp.setFocus()
-        else:
-            # Tool shortcuts (P, M, Q, S, etc.) are QActions on the main window
-            target = self.win if self.win is not None else vp
+            press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, "")
+            release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, "")
+            if target is not None:
+                QApplication.sendEvent(target, press)
+                QApplication.sendEvent(target, release)
+            if vp is not None and hasattr(vp, "setFocus"):
+                vp.setFocus()
+            self._flash(f"Active tool: {name}")
+            return
 
-        press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
-        release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
-        if target is not None:
-            QApplication.sendEvent(target, press)
-            QApplication.sendEvent(target, release)
+        # Public Qt API: find matching QAction on the main window by shortcut sequence.
+        # This triggers successfully even when toolbars are hidden (Clean Screen mode).
+        triggered = False
+        if self.win is not None:
+            target_seq = QKeySequence(qt_key)
+            for act in self.win.findChildren(QAction):
+                shortcuts = act.shortcuts()
+                if (shortcuts and any(s == target_seq for s in shortcuts)) or act.shortcut() == target_seq:
+                    act.trigger()
+                    triggered = True
+                    break
+
+        if not triggered:
+            # Fallback: simulate key press on window/viewport
+            shortcut_text = shortcut if len(shortcut) == 1 else ""
+            target = self.win if self.win is not None else vp
+            press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
+            release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
+            if target is not None:
+                QApplication.sendEvent(target, press)
+                QApplication.sendEvent(target, release)
 
         # Restore focus to viewport so modeling can continue immediately
         if vp is not None and hasattr(vp, "setFocus"):
