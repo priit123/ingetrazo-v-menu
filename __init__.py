@@ -46,85 +46,12 @@ from PySide6.QtWidgets import (
 )
 from tools.base import Tool
 
-from .settings import get_menu_scale, open_settings_dialog
+from .settings import get_menu_scale, get_pie_items, open_settings_dialog
 
 log = logging.getLogger("ingetrazo.plugins.v_menu")
 
-# =============================================================================
-# Configuration: Radial Menu Tool List (10 Tools Clockwise from North)
-# =============================================================================
-PIE_ITEMS = [
-    {
-        "key": "pushpull",
-        "name": "Push/Pull",
-        "shortcut": "P",
-        "qt_key": Qt.Key_P,
-        "desc": "Push or pull faces into 3D geometry",
-    },
-    {
-        "key": "move",
-        "name": "Move",
-        "shortcut": "M",
-        "qt_key": Qt.Key_M,
-        "desc": "Move selected geometry or objects",
-    },
-    {
-        "key": "rotate",
-        "name": "Rotate",
-        "shortcut": "Q",
-        "qt_key": Qt.Key_Q,
-        "desc": "Rotate geometry around an axis",
-    },
-    {
-        "key": "scale",
-        "name": "Scale",
-        "shortcut": "S",
-        "qt_key": Qt.Key_S,
-        "desc": "Scale selected geometry",
-    },
-    {
-        "key": "offset",
-        "name": "Offset",
-        "shortcut": "F",
-        "qt_key": Qt.Key_F,
-        "desc": "Offset edges and contours",
-    },
-    {
-        "key": "delete",
-        "name": "Delete",
-        "shortcut": "Del",
-        "qt_key": Qt.Key_Delete,
-        "desc": "Delete selected entities",
-    },
-    {
-        "key": "line",
-        "name": "Line",
-        "shortcut": "L",
-        "qt_key": Qt.Key_L,
-        "desc": "Draw straight lines and edges",
-    },
-    {
-        "key": "rectangle",
-        "name": "Rectangle",
-        "shortcut": "R",
-        "qt_key": Qt.Key_R,
-        "desc": "Draw planar rectangular faces",
-    },
-    {
-        "key": "circle",
-        "name": "Circle",
-        "shortcut": "C",
-        "qt_key": Qt.Key_C,
-        "desc": "Draw circular faces and polygons",
-    },
-    {
-        "key": "tape",
-        "name": "Tape Measure",
-        "shortcut": "T",
-        "qt_key": Qt.Key_T,
-        "desc": "Measure distances and create guides",
-    },
-]
+# Default pie items (resolved from settings / catalog)
+PIE_ITEMS = get_pie_items()
 
 # Base sizing constants (at 100% scale)
 BASE_INNER_RADIUS = 44.0      # Center dead-zone radius (pixels)
@@ -304,22 +231,31 @@ class PieMenuWidget(QWidget):
             self._icon_rects.append(rect)
 
     def _load_app_icons(self):
-        """Retrieve official QIcons from IngeTrazo tool actions.
+        """Retrieve official QIcons from IngeTrazo tool or navigation actions.
 
-        NOTE: win._tool_actions is a private IngeTrazo internal used here
-        only for icon loading. A public app.get_tool_icon() API has been
-        requested in the IngeTrazo issue tracker. This call is read-only
-        and fails silently — icons fall back to vector rendering if absent.
+        NOTE: win._tool_actions and win._nav_actions are used here only for
+        reading existing QIcons. This call is read-only and fails silently.
         """
         tool_actions = getattr(self.win, "_tool_actions", {}) or {}
+        nav_actions = getattr(self.win, "_nav_actions", {}) or {}
         for item in self.items:
             key = item["key"]
-            act = tool_actions.get(key)
+            act = tool_actions.get(key) or nav_actions.get(key)
             if act is not None and not act.icon().isNull():
                 self._icons[key] = act.icon()
 
+    def update_items(self, items: list[dict]):
+        """Update items list, recompute sector geometry and reload icons."""
+        self.items = items
+        self.num_items = len(self.items)
+        self.slice_angle = 360.0 / max(1, self.num_items)
+        self._precompute_geometry()
+        self._load_app_icons()
+        self.update()
+
     def show_at_cursor(self):
         """Display menu centered exactly at current cursor coordinates, bounded to screen."""
+        self.update_items(get_pie_items())
         self.apply_scale(get_menu_scale())
 
         cursor_pos = QCursor.pos()
@@ -419,6 +355,7 @@ class PieMenuWidget(QWidget):
         name = item["name"]
         qt_key = item["qt_key"]
         shortcut = item["shortcut"]
+        modifiers = item.get("modifiers", Qt.NoModifier)
 
         vp = getattr(self.win, "viewport", None)
 
@@ -441,7 +378,7 @@ class PieMenuWidget(QWidget):
         # This triggers successfully even when toolbars are hidden (Clean Screen mode).
         triggered = False
         if self.win is not None:
-            target_seq = QKeySequence(qt_key)
+            target_seq = QKeySequence(shortcut) if shortcut else QKeySequence(qt_key)
             for act in self.win.findChildren(QAction):
                 shortcuts = act.shortcuts()
                 if (shortcuts and any(s == target_seq for s in shortcuts)) or act.shortcut() == target_seq:
@@ -453,8 +390,8 @@ class PieMenuWidget(QWidget):
             # Fallback: simulate key press on window/viewport
             shortcut_text = shortcut if len(shortcut) == 1 else ""
             target = self.win if self.win is not None else vp
-            press = QKeyEvent(QEvent.KeyPress, qt_key, Qt.NoModifier, shortcut_text)
-            release = QKeyEvent(QEvent.KeyRelease, qt_key, Qt.NoModifier, shortcut_text)
+            press = QKeyEvent(QEvent.KeyPress, qt_key, modifiers, shortcut_text)
+            release = QKeyEvent(QEvent.KeyRelease, qt_key, modifiers, shortcut_text)
             if target is not None:
                 QApplication.sendEvent(target, press)
                 QApplication.sendEvent(target, release)
@@ -625,7 +562,7 @@ def _get_or_create_pie_menu(win=None) -> PieMenuWidget:
         win = QApplication.activeWindow()
 
     if _PIE_MENU_INSTANCE is None or _PIE_MENU_INSTANCE.win != win:
-        _PIE_MENU_INSTANCE = PieMenuWidget(win, PIE_ITEMS)
+        _PIE_MENU_INSTANCE = PieMenuWidget(win, get_pie_items())
     return _PIE_MENU_INSTANCE
 
 

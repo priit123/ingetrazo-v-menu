@@ -27,18 +27,21 @@ Pressing **`V`** opens a 10-tool circular menu directly under the cursor.
 3. Extract the zip into that folder (as a `v_menu` folder).
 4. Restart IngeTrazo.
 
-## Settings & Sizing
+## Settings & Customization
 
-You can adjust the size of the radial menu to suit your screen resolution or personal preference:
+You can adjust the size of the radial menu and customize each of the 10 tool slots directly from the settings dialog:
 
 1. In IngeTrazo, go to: **Extensions ▸ V Menu Settings...**
-2. Use the slider to scale the menu between **50% and 150%** (in 5% steps).
-3. Click **Reset to 100%** at any time to restore the default size.
+2. **Menu Size:** Use the slider to scale the menu between **50% and 150%** (in 5% steps). Click **Reset to 100%** to restore the default size.
+3. **Menu Slots:** Assign any of the 21 supported IngeTrazo tools to any slot (Slot 1 at 12:00 North, clockwise to Slot 10):
+   - Push/Pull (`P`), Move (`M`), Rotate (`Q`), Scale (`S`), Offset (`F`)
+   - Delete (`Del`), Eraser (`E`), Line (`L`), Rectangle (`R`), Circle (`C`)
+   - Tape Measure (`T`), Dimension (`D`), Arc (`A`), Paint / Material (`B`)
+   - 3-Point Arc (`J`), Center Arc (`Shift+O`), Protractor (`Shift+H`)
+   - Text (`X`), Path (`Y`), Orbit (`O`), Pan (`H`)
+4. Click **Reset Slots to Default** at any time to restore the original 10-tool layout.
 
-
-## Customization
-
-The tool list can be customized by editing `PIE_ITEMS` in `__init__.py`.
+Settings are saved automatically via Qt `QSettings` and persist across sessions and plugin updates without modifying plugin files.
 
 ## License
 
