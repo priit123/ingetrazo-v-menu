@@ -26,6 +26,7 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
+    QGuiApplication,
     QIcon,
     QKeyEvent,
     QKeySequence,
@@ -44,6 +45,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from tools.base import Tool
+
+from .settings import get_menu_scale, open_settings_dialog
 
 log = logging.getLogger("ingetrazo.plugins.v_menu")
 
@@ -123,9 +126,11 @@ PIE_ITEMS = [
     },
 ]
 
-# Visual sizing constants
-INNER_RADIUS = 44.0      # Center dead-zone radius (pixels)
-OUTER_RADIUS = 120.0     # Outer menu radius (pixels)
+# Base sizing constants (at 100% scale)
+BASE_INNER_RADIUS = 44.0      # Center dead-zone radius (pixels)
+BASE_OUTER_RADIUS = 120.0     # Outer menu radius (pixels)
+INNER_RADIUS = BASE_INNER_RADIUS
+OUTER_RADIUS = BASE_OUTER_RADIUS
 TOTAL_SIZE = int(OUTER_RADIUS * 2 + 30)  # Widget canvas size
 
 
@@ -227,12 +232,12 @@ class PieMenuWidget(QWidget):
 
         self._hovered_index = -1
         self._icons: dict[str, QIcon] = {}
+        self.scale_factor = 1.0
+        self.inner_radius = BASE_INNER_RADIUS
+        self.outer_radius = BASE_OUTER_RADIUS
 
         # Cached drawing resources & precomputed sector geometry
-        self._cached_fonts = {
-            "title": QFont("Segoe UI", 8, QFont.Bold),
-            "sub": QFont("Segoe UI", 7),
-        }
+        self._cached_fonts = {}
         self._sector_paths: list[QPainterPath] = []
         self._icon_centers: list[QPointF] = []
         self._icon_rects: list[QRectF] = []
@@ -240,21 +245,34 @@ class PieMenuWidget(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setMouseTracking(True)
-        self.resize(TOTAL_SIZE, TOTAL_SIZE)
 
-        # Precompute geometry once
-        self._precompute_geometry()
-
-        # Load native IngeTrazo icons
+        # Precompute geometry & load icons
+        self.apply_scale(get_menu_scale())
         self._load_app_icons()
+
+    def apply_scale(self, scale: float):
+        """Update geometry, fonts and canvas size based on scale multiplier."""
+        self.scale_factor = max(0.5, min(2.0, float(scale)))
+        self.inner_radius = BASE_INNER_RADIUS * self.scale_factor
+        self.outer_radius = BASE_OUTER_RADIUS * self.scale_factor
+        total_dim = int(round(self.outer_radius * 2 + 30.0 * self.scale_factor))
+        self.resize(total_dim, total_dim)
+
+        title_pt = max(6, int(round(8.0 * self.scale_factor)))
+        sub_pt = max(5, int(round(7.0 * self.scale_factor)))
+        self._cached_fonts = {
+            "title": QFont("Segoe UI", title_pt, QFont.Bold),
+            "sub": QFont("Segoe UI", sub_pt),
+        }
+        self._precompute_geometry()
 
     def _precompute_geometry(self):
         """Precompute QPainterPath sectors and icon positioning vectors."""
-        cx = TOTAL_SIZE / 2.0
-        cy = TOTAL_SIZE / 2.0
-        rect_out = QRectF(cx - OUTER_RADIUS, cy - OUTER_RADIUS, OUTER_RADIUS * 2, OUTER_RADIUS * 2)
-        rect_in = QRectF(cx - INNER_RADIUS, cy - INNER_RADIUS, INNER_RADIUS * 2, INNER_RADIUS * 2)
-        r_icon = (INNER_RADIUS + OUTER_RADIUS) / 2.0
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        rect_out = QRectF(cx - self.outer_radius, cy - self.outer_radius, self.outer_radius * 2, self.outer_radius * 2)
+        rect_in = QRectF(cx - self.inner_radius, cy - self.inner_radius, self.inner_radius * 2, self.inner_radius * 2)
+        r_icon = (self.inner_radius + self.outer_radius) / 2.0
 
         self._sector_paths.clear()
         self._icon_centers.clear()
@@ -280,7 +298,8 @@ class PieMenuWidget(QWidget):
             center_pt = QPointF(icon_cx, icon_cy)
             self._icon_centers.append(center_pt)
 
-            icon_size = 18 if item["key"] == "delete" else 24.0
+            base_size = 18.0 if item["key"] == "delete" else 24.0
+            icon_size = base_size * self.scale_factor
             rect = QRectF(icon_cx - icon_size / 2.0, icon_cy - icon_size / 2.0, icon_size, icon_size)
             self._icon_rects.append(rect)
 
@@ -300,9 +319,21 @@ class PieMenuWidget(QWidget):
                 self._icons[key] = act.icon()
 
     def show_at_cursor(self):
-        """Display menu centered exactly at current cursor coordinates."""
+        """Display menu centered exactly at current cursor coordinates, bounded to screen."""
+        self.apply_scale(get_menu_scale())
+
         cursor_pos = QCursor.pos()
-        self.move(cursor_pos.x() - self.width() // 2, cursor_pos.y() - self.height() // 2)
+        target_x = cursor_pos.x() - self.width() // 2
+        target_y = cursor_pos.y() - self.height() // 2
+
+        # Keep menu fully within current screen bounds
+        screen = QGuiApplication.screenAt(cursor_pos) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            target_x = max(geo.left(), min(target_x, geo.right() - self.width()))
+            target_y = max(geo.top(), min(target_y, geo.bottom() - self.height()))
+
+        self.move(target_x, target_y)
         self._hovered_index = -1
         self.show()
         self.raise_()
@@ -320,7 +351,7 @@ class PieMenuWidget(QWidget):
         dy = pos.y() - cy
         dist = math.hypot(dx, dy)
 
-        if dist < INNER_RADIUS or dist > (OUTER_RADIUS + 30.0):
+        if dist < self.inner_radius or dist > (self.outer_radius + 30.0 * self.scale_factor):
             new_hover = -1
         else:
             # 0 degrees is North (Top), angle increases clockwise.
@@ -342,7 +373,7 @@ class PieMenuWidget(QWidget):
             pos = event.position()
             dist = math.hypot(pos.x() - cx, pos.y() - cy)
 
-            if dist < INNER_RADIUS:
+            if dist < self.inner_radius:
                 # Center click toggles Clean Screen (Ctrl+0)
                 self.close()
                 QTimer.singleShot(0, self._trigger_clean_screen)
@@ -508,30 +539,33 @@ class PieMenuWidget(QWidget):
         # 2. Center hub circle (clean, neutral border without highlight)
         painter.setPen(QPen(pal["border"], 1.5))
         painter.setBrush(QBrush(pal["center_bg"]))
-        painter.drawEllipse(center, INNER_RADIUS, INNER_RADIUS)
+        painter.drawEllipse(center, self.inner_radius, self.inner_radius)
 
         # 3. Center hub text
         font_title = self._cached_fonts["title"]
         font_sub = self._cached_fonts["sub"]
+        hw = self.inner_radius - 2.0
+        text_rect_top = QRectF(cx - hw, cy - 14.0 * self.scale_factor, hw * 2, 14.0 * self.scale_factor)
+        text_rect_bottom = QRectF(cx - hw, cy + 1.0 * self.scale_factor, hw * 2, 14.0 * self.scale_factor)
 
         if 0 <= self._hovered_index < self.num_items:
             active_item = self.items[self._hovered_index]
             painter.setFont(font_title)
             painter.setPen(pal["text_hover"])
-            painter.drawText(QRectF(cx - 40, cy - 14, 80, 14), Qt.AlignCenter, active_item["name"])
+            painter.drawText(text_rect_top, Qt.AlignCenter, active_item["name"])
 
             painter.setFont(font_sub)
             painter.setPen(QColor(243, 115, 41))
-            painter.drawText(QRectF(cx - 40, cy + 1, 80, 14), Qt.AlignCenter, f"Key: {active_item['shortcut']}")
+            painter.drawText(text_rect_bottom, Qt.AlignCenter, f"Key: {active_item['shortcut']}")
         else:
             # Default center text — immediate Clean Screen action hint
             painter.setFont(font_title)
             painter.setPen(QColor(243, 115, 41))
-            painter.drawText(QRectF(cx - 42, cy - 14, 84, 14), Qt.AlignCenter, "Clean Screen")
+            painter.drawText(text_rect_top, Qt.AlignCenter, "Clean Screen")
 
             painter.setFont(font_sub)
             painter.setPen(pal["text_dim"])
-            painter.drawText(QRectF(cx - 42, cy + 1, 84, 14), Qt.AlignCenter, "Ctrl+0")
+            painter.drawText(text_rect_bottom, Qt.AlignCenter, "Ctrl+0")
 
 
 # =============================================================================
@@ -580,6 +614,7 @@ class PieMenuKeyFilter(QObject):
 # =============================================================================
 _PIE_MENU_INSTANCE: PieMenuWidget | None = None
 _KEY_FILTER: PieMenuKeyFilter | None = None
+_SETTINGS_ACTION: QAction | None = None
 
 
 def _get_or_create_pie_menu(win=None) -> PieMenuWidget:
@@ -619,8 +654,8 @@ class VPieMenuTool(Tool):
 
 
 def setup(app):
-    """Extension initialization hook. Installs key event filter on viewport only."""
-    global _KEY_FILTER
+    """Extension initialization hook. Installs key event filter and settings menu action."""
+    global _KEY_FILTER, _SETTINGS_ACTION
     win = app.window
 
     _KEY_FILTER = PieMenuKeyFilter(win)
@@ -636,16 +671,30 @@ def setup(app):
         win.installEventFilter(_KEY_FILTER)
         log.warning("V Menu: viewport not found; event filter installed on main window.")
 
+    # Register Settings entry in Extensions menu
+    try:
+        if hasattr(app, "add_menu_action"):
+            _SETTINGS_ACTION = app.add_menu_action(
+                "V Menu Settings...",
+                lambda: open_settings_dialog(win),
+                tip="Configure radial menu scale and size",
+            )
+        elif hasattr(app, "add_menu"):
+            menu = app.add_menu("V Menu")
+            _SETTINGS_ACTION = menu.addAction("Settings...", lambda: open_settings_dialog(win))
+    except Exception:
+        log.exception("V Menu: failed to register Settings menu item")
+
     log.info("V Menu loaded. Press 'V' in the 3D viewport to open the menu.")
 
 
 def teardown(app):
-    """Extension teardown hook. Removes event filter and closes menu.
+    """Extension teardown hook. Removes event filter, settings action and closes menu.
 
     Called by IngeTrazo when the extension is disabled or unloaded.
     Ensures no filter or state lingers until the next restart.
     """
-    global _KEY_FILTER, _PIE_MENU_INSTANCE
+    global _KEY_FILTER, _PIE_MENU_INSTANCE, _SETTINGS_ACTION
     win = app.window
 
     # Close menu immediately if it is open
@@ -655,6 +704,14 @@ def teardown(app):
         except RuntimeError:
             pass  # Widget already destroyed
         _PIE_MENU_INSTANCE = None
+
+    # Remove settings menu action if registered
+    if _SETTINGS_ACTION is not None:
+        try:
+            _SETTINGS_ACTION.deleteLater()
+        except Exception:
+            pass
+        _SETTINGS_ACTION = None
 
     # Remove event filter from all possible targets (no-op if not installed)
     if _KEY_FILTER is not None:
