@@ -27,6 +27,16 @@ Pressing **`V`** opens a 10-tool circular menu directly under the cursor.
 3. Extract the zip into that folder (as a `v_menu` folder).
 4. Restart IngeTrazo.
 
+## Settings & Sizing
+
+You can adjust the size of the radial menu to suit your screen resolution or personal preference:
+
+1. In IngeTrazo, go to: **Extensions ▸ V Menu Settings...**
+2. Use the slider to scale the menu between **50% and 150%** (in 5% steps).
+3. Click **Reset to 100%** at any time to restore the default size.
+
+Settings are saved automatically via `QSettings` and persist across application restarts without modifying any files in the plugin directory.
+
 ## Customization
 
 The tool list can be customized by editing `PIE_ITEMS` in `__init__.py`.
