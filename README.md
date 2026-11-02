@@ -35,7 +35,6 @@ You can adjust the size of the radial menu to suit your screen resolution or per
 2. Use the slider to scale the menu between **50% and 150%** (in 5% steps).
 3. Click **Reset to 100%** at any time to restore the default size.
 
-Settings are saved automatically via `QSettings` and persist across application restarts without modifying any files in the plugin directory.
 
 ## Customization
 
