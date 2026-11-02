@@ -36,7 +36,7 @@ You can adjust the size of the radial menu and customize each of the 10 tool slo
 3. **Menu Slots:** Assign any of the 21 supported IngeTrazo tools to any slot (Slot 1 at 12:00 North, clockwise to Slot 10):
    - Push/Pull (`P`), Move (`M`), Rotate (`Q`), Scale (`S`), Offset (`F`)
    - Delete (`Del`), Eraser (`E`), Line (`L`), Rectangle (`R`), Circle (`C`)
-   - Tape Measure (`T`), Dimension (`D`), Arc (`A`), Paint / Material (`B`)
+   - Tape Measure (`T`), Dimension (`D`), Arc (`A`), Paint (`B`)
    - 3-Point Arc (`J`), Center Arc (`Shift+O`), Protractor (`Shift+H`)
    - Text (`X`), Path (`Y`), Orbit (`O`), Pan (`H`)
 4. Click **Reset Slots to Default** at any time to restore the original 10-tool layout.

@@ -8,8 +8,19 @@ pattern.
 from __future__ import annotations
 
 import json
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -142,7 +153,7 @@ TOOL_CATALOG: dict[str, dict] = {
     },
     "paint": {
         "key": "paint",
-        "name": "Paint / Material",
+        "name": "Paint",
         "shortcut": "B",
         "qt_key": Qt.Key_B,
         "modifiers": Qt.NoModifier,
@@ -297,6 +308,76 @@ def get_pie_items() -> list[dict]:
     return [TOOL_CATALOG[key] for key in get_menu_slots()]
 
 
+def _make_delete_icon(size: int = 18) -> QIcon:
+    """Create a theme-aware vector trash bin QIcon for the Delete tool in dropdowns."""
+    app = QApplication.instance()
+    dark = True
+    if app is not None:
+        bg = app.palette().color(QPalette.ColorRole.Window)
+        dark = bg.lightness() < 128
+
+    color = QColor(224, 224, 224) if dark else QColor(20, 22, 26)
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    s = size / 18.0
+    center = QPointF(size / 2.0, size / 2.0)
+    rect = QRectF(0.0, 0.0, float(size), float(size))
+
+    pen = QPen(color, max(1.0, 1.8 * s), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    bx = rect.x() + 4.0 * s
+    by = rect.y() + 5.5 * s
+    bw = rect.width() - 8.0 * s
+    bh = rect.height() - 7.0 * s
+    r_corner = 2.0 * s
+    painter.drawLine(QPointF(rect.x() + 2.0 * s, by), QPointF(rect.right() - 2.0 * s, by))
+    painter.drawLine(QPointF(center.x() - 2.5 * s, by - 2.5 * s), QPointF(center.x() + 2.5 * s, by - 2.5 * s))
+    painter.drawRoundedRect(QRectF(bx, by, bw, bh), r_corner, r_corner)
+    painter.drawLine(QPointF(center.x() - 2.0 * s, by + 2.5 * s), QPointF(center.x() - 2.0 * s, by + bh - 2.5 * s))
+    painter.drawLine(QPointF(center.x() + 2.0 * s, by + 2.5 * s), QPointF(center.x() + 2.0 * s, by + bh - 2.5 * s))
+    painter.end()
+    return QIcon(pix)
+
+
+def _resolve_catalog_icons(win: QWidget | None) -> dict[str, QIcon]:
+    """Resolve QIcons for all tools in TOOL_CATALOG from the main window's QActions."""
+    icons: dict[str, QIcon] = {"delete": _make_delete_icon(18)}
+    if win is None:
+        return icons
+
+    all_actions = win.findChildren(QAction)
+    by_seq: dict[QKeySequence, QAction] = {}
+    for act in all_actions:
+        for seq in act.shortcuts():
+            if not seq.isEmpty() and seq not in by_seq:
+                by_seq[seq] = act
+        sc = act.shortcut()
+        if not sc.isEmpty() and sc not in by_seq:
+            by_seq[sc] = act
+
+    tool_actions = getattr(win, "_tool_actions", {}) or {}
+    nav_actions = getattr(win, "_nav_actions", {}) or {}
+
+    for key, tool in TOOL_CATALOG.items():
+        if key == "delete":
+            continue
+        shortcut = tool.get("shortcut")
+        qt_key = tool.get("qt_key")
+        target_seq = QKeySequence(shortcut) if shortcut else QKeySequence(qt_key)
+        act = by_seq.get(target_seq)
+        if act is None:
+            act = tool_actions.get(key) or nav_actions.get(key)
+        if act is not None and not act.icon().isNull():
+            icons[key] = act.icon()
+
+    return icons
+
+
 class VMenuSettingsDialog(QDialog):
     """Clean settings dialog allowing the user to configure scale and menu slots."""
 
@@ -308,6 +389,7 @@ class VMenuSettingsDialog(QDialog):
 
         current_pct = int(round(get_menu_scale() * 100.0))
         current_slots = get_menu_slots()
+        catalog_icons = _resolve_catalog_icons(parent)
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(14)
@@ -368,6 +450,7 @@ class VMenuSettingsDialog(QDialog):
         form_layout.setContentsMargins(4, 4, 4, 4)
 
         self.slot_combos: list[QComboBox] = []
+        self._slot_keys: list[str] = []
         slot_descriptions = [
             "Slot 1 (12:00 North):",
             "Slot 2:",
@@ -383,14 +466,22 @@ class VMenuSettingsDialog(QDialog):
 
         for i in range(NUM_SLOTS):
             combo = QComboBox(scroll_content)
+            combo.setIconSize(QSize(18, 18))
             for key, tool in TOOL_CATALOG.items():
                 label = f"{tool['name']} ({tool['shortcut']})"
-                combo.addItem(label, key)
+                icon = catalog_icons.get(key)
+                if icon is not None:
+                    combo.addItem(icon, label, key)
+                else:
+                    combo.addItem(label, key)
 
             selected_key = current_slots[i] if i < len(current_slots) else DEFAULT_SLOTS[i]
             idx = combo.findData(selected_key)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
+
+            self._slot_keys.append(combo.currentData())
+            combo.currentIndexChanged.connect(lambda _idx, slot_idx=i: self._on_slot_changed(slot_idx))
 
             form_layout.addRow(slot_descriptions[i], combo)
             self.slot_combos.append(combo)
@@ -419,6 +510,26 @@ class VMenuSettingsDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         main_layout.addWidget(self.button_box)
 
+    def _on_slot_changed(self, changed_slot_idx: int):
+        """Automatically swap tools if the user selects a tool already assigned to another slot."""
+        combo = self.slot_combos[changed_slot_idx]
+        new_key = combo.currentData()
+        old_key = self._slot_keys[changed_slot_idx]
+        if new_key == old_key:
+            return
+
+        for i, other_combo in enumerate(self.slot_combos):
+            if i != changed_slot_idx and other_combo.currentData() == new_key:
+                swap_idx = other_combo.findData(old_key)
+                if swap_idx >= 0:
+                    other_combo.blockSignals(True)
+                    other_combo.setCurrentIndex(swap_idx)
+                    other_combo.blockSignals(False)
+                    self._slot_keys[i] = old_key
+                break
+
+        self._slot_keys[changed_slot_idx] = new_key
+
     def _on_slider_value_changed(self, val: int):
         """Snap slider value to STEP_SCALE_PERCENT (5%) increments even when dragging."""
         snapped = int(round(val / STEP_SCALE_PERCENT) * STEP_SCALE_PERCENT)
@@ -440,7 +551,10 @@ class VMenuSettingsDialog(QDialog):
             key = DEFAULT_SLOTS[i]
             idx = combo.findData(key)
             if idx >= 0:
+                combo.blockSignals(True)
                 combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+            self._slot_keys[i] = combo.currentData()
 
     def _on_accept(self):
         set_menu_scale(self.slider.value())

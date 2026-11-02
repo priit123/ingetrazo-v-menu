@@ -1,20 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # V Menu — Pie / Radial Menu for IngeTrazo
-"""V Menu — Circular radial quick tool menu for IngeTrazo 3D CAD/BIM modeler.
 
-Pressing 'V' opens a 10-slice circular radial menu directly under the cursor,
-providing fast 1-click access to core modeling tools:
-1. Push/Pull (P) - North (12:00)
-2. Move (M)
-3. Rotate (Q)
-4. Scale (S)
-5. Offset (F)
-6. Delete (Del) - South (06:00)
-7. Line (L)
-8. Rectangle (R)
-9. Circle (C)
-10. Tape Measure (T)
-"""
 from __future__ import annotations
 
 import logging
@@ -26,6 +12,7 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
+    QFontMetricsF,
     QGuiApplication,
     QIcon,
     QKeyEvent,
@@ -376,6 +363,15 @@ class PieMenuWidget(QWidget):
 
         super().keyPressEvent(event)
 
+    def focusOutEvent(self, event):
+        self.close()
+        super().focusOutEvent(event)
+
+    def event(self, event):
+        if event.type() == QEvent.WindowDeactivate:
+            self.close()
+        return super().event(event)
+
     def closeEvent(self, event):
         self.releaseMouse()
         super().closeEvent(event)
@@ -434,9 +430,9 @@ class PieMenuWidget(QWidget):
 
     def _trigger_clean_screen(self):
         """Toggle Clean Screen via public QAction lookup or key simulation."""
-        # 1. Preferred public Qt API: find Clean Screen QAction on the window
+        # 1. Preferred public Qt API: find Clean Screen QAction across window
         if self.win:
-            for action in self.win.actions():
+            for action in self.win.findChildren(QAction):
                 sc = action.shortcut().toString()
                 text = action.text().lower()
                 if sc in ("Ctrl+0", "Ctrl+Num+0") or "clean" in text:
@@ -452,6 +448,18 @@ class PieMenuWidget(QWidget):
             QApplication.sendEvent(target, press)
             QApplication.sendEvent(target, release)
             self._flash("Clean Screen toggled")
+
+    def _fit_title_font(self, text: str, max_width: float) -> QFont:
+        """Return the cached title font, shrinking slightly if text exceeds max_width."""
+        font = self._cached_fonts["title"]
+        if QFontMetricsF(font).horizontalAdvance(text) <= max_width:
+            return font
+        fitted = QFont(font)
+        pt = fitted.pointSize()
+        while pt > 5 and QFontMetricsF(fitted).horizontalAdvance(text) > max_width:
+            pt -= 1
+            fitted.setPointSize(pt)
+        return fitted
 
     def _flash(self, message: str):
         vp = getattr(self.win, "viewport", None)
@@ -510,26 +518,28 @@ class PieMenuWidget(QWidget):
         painter.drawEllipse(center, self.inner_radius, self.inner_radius)
 
         # 3. Center hub text
-        font_title = self._cached_fonts["title"]
         font_sub = self._cached_fonts["sub"]
-        hw = self.inner_radius - 2.0
-        text_rect_top = QRectF(cx - hw, cy - 14.0 * self.scale_factor, hw * 2, 14.0 * self.scale_factor)
-        text_rect_bottom = QRectF(cx - hw, cy + 1.0 * self.scale_factor, hw * 2, 14.0 * self.scale_factor)
+        hw = self.inner_radius - 3.0
+        max_text_w = hw * 2.0
+        text_rect_top = QRectF(cx - hw, cy - 14.0 * self.scale_factor, max_text_w, 14.0 * self.scale_factor)
+        text_rect_bottom = QRectF(cx - hw, cy + 1.0 * self.scale_factor, max_text_w, 14.0 * self.scale_factor)
 
         if 0 <= self._hovered_index < self.num_items:
             active_item = self.items[self._hovered_index]
-            painter.setFont(font_title)
+            title_text = active_item["name"]
+            painter.setFont(self._fit_title_font(title_text, max_text_w))
             painter.setPen(pal["text_hover"])
-            painter.drawText(text_rect_top, Qt.AlignCenter, active_item["name"])
+            painter.drawText(text_rect_top, Qt.AlignCenter, title_text)
 
             painter.setFont(font_sub)
             painter.setPen(QColor(243, 115, 41))
             painter.drawText(text_rect_bottom, Qt.AlignCenter, f"Key: {active_item['shortcut']}")
         else:
             # Default center text — immediate Clean Screen action hint
-            painter.setFont(font_title)
+            title_text = "Clean Screen"
+            painter.setFont(self._fit_title_font(title_text, max_text_w))
             painter.setPen(QColor(243, 115, 41))
-            painter.drawText(text_rect_top, Qt.AlignCenter, "Clean Screen")
+            painter.drawText(text_rect_top, Qt.AlignCenter, title_text)
 
             painter.setFont(font_sub)
             painter.setPen(pal["text_dim"])
