@@ -41,7 +41,6 @@ You can adjust the size of the radial menu and customize each of the 10 tool slo
    - Text (`X`), Path (`Y`), Orbit (`O`), Pan (`H`)
 4. Click **Reset Slots to Default** at any time to restore the original 10-tool layout.
 
-Settings are saved automatically via Qt `QSettings` and persist across sessions and plugin updates without modifying plugin files.
 
 ## License
 

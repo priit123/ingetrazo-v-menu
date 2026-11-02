@@ -50,15 +50,9 @@ from .settings import get_menu_scale, get_pie_items, open_settings_dialog
 
 log = logging.getLogger("ingetrazo.plugins.v_menu")
 
-# Default pie items (resolved from settings / catalog)
-PIE_ITEMS = get_pie_items()
-
 # Base sizing constants (at 100% scale)
 BASE_INNER_RADIUS = 44.0      # Center dead-zone radius (pixels)
 BASE_OUTER_RADIUS = 120.0     # Outer menu radius (pixels)
-INNER_RADIUS = BASE_INNER_RADIUS
-OUTER_RADIUS = BASE_OUTER_RADIUS
-TOTAL_SIZE = int(OUTER_RADIUS * 2 + 30)  # Widget canvas size
 
 
 # =============================================================================
@@ -100,32 +94,32 @@ _LIGHT_PALETTE: dict[str, QColor] = {
 }
 
 
-def _get_palette() -> dict[str, QColor]:
-    """Return the color palette matching the current IngeTrazo theme."""
-    return _DARK_PALETTE if _is_dark_theme() else _LIGHT_PALETTE
-
-
 # =============================================================================
 # Delete Vector Icon & Generic Fallback
 # =============================================================================
 def _draw_delete_icon(painter: QPainter, center: QPointF, size: float, color: QColor):
-    """Draw clean vector trash bin glyph for the Delete action."""
+    """Draw clean vector trash bin glyph for the Delete action, scaled proportionally."""
     painter.save()
     painter.setRenderHint(QPainter.Antialiasing, True)
+    s = size / 18.0  # Proportional scale relative to base 18px icon size
     hs = size / 2.0
     rect = QRectF(center.x() - hs, center.y() - hs, size, size)
 
-    pen = QPen(color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    pen = QPen(color, max(1.0, 2.0 * s), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
 
     # Trash bin icon
-    bx, by, bw, bh = rect.x() + 4, rect.y() + 6, rect.width() - 8, rect.height() - 7
-    painter.drawLine(QPointF(rect.x() + 2, by), QPointF(rect.right() - 2, by))
-    painter.drawLine(QPointF(center.x() - 3, by - 3), QPointF(center.x() + 3, by - 3))
-    painter.drawRoundedRect(QRectF(bx, by, bw, bh), 2, 2)
-    painter.drawLine(QPointF(center.x() - 2.5, by + 3), QPointF(center.x() - 2.5, by + bh - 3))
-    painter.drawLine(QPointF(center.x() + 2.5, by + 3), QPointF(center.x() + 2.5, by + bh - 3))
+    bx = rect.x() + 4.0 * s
+    by = rect.y() + 6.0 * s
+    bw = rect.width() - 8.0 * s
+    bh = rect.height() - 7.0 * s
+    r_corner = 2.0 * s
+    painter.drawLine(QPointF(rect.x() + 2.0 * s, by), QPointF(rect.right() - 2.0 * s, by))
+    painter.drawLine(QPointF(center.x() - 3.0 * s, by - 3.0 * s), QPointF(center.x() + 3.0 * s, by - 3.0 * s))
+    painter.drawRoundedRect(QRectF(bx, by, bw, bh), r_corner, r_corner)
+    painter.drawLine(QPointF(center.x() - 2.5 * s, by + 3.0 * s), QPointF(center.x() - 2.5 * s, by + bh - 3.0 * s))
+    painter.drawLine(QPointF(center.x() + 2.5 * s, by + 3.0 * s), QPointF(center.x() + 2.5 * s, by + bh - 3.0 * s))
     painter.restore()
 
 
@@ -153,13 +147,13 @@ class PieMenuWidget(QWidget):
 
         super().__init__(main_window, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.win = main_window
-        self.items = items or PIE_ITEMS
+        self.items = items if items is not None else get_pie_items()
         self.num_items = len(self.items)
         self.slice_angle = 360.0 / max(1, self.num_items)
 
         self._hovered_index = -1
         self._icons: dict[str, QIcon] = {}
-        self.scale_factor = 1.0
+        self.scale_factor = 0.0  # Initialized via apply_scale()
         self.inner_radius = BASE_INNER_RADIUS
         self.outer_radius = BASE_OUTER_RADIUS
 
@@ -255,8 +249,22 @@ class PieMenuWidget(QWidget):
 
     def show_at_cursor(self):
         """Display menu centered exactly at current cursor coordinates, bounded to screen."""
-        self.update_items(get_pie_items())
-        self.apply_scale(get_menu_scale())
+        new_items = get_pie_items()
+        new_scale = max(0.5, min(2.0, float(get_menu_scale())))
+
+        items_changed = [it["key"] for it in new_items] != [it["key"] for it in self.items]
+        scale_changed = abs(new_scale - self.scale_factor) > 1e-4
+
+        if items_changed:
+            self.items = new_items
+            self.num_items = len(self.items)
+            self.slice_angle = 360.0 / max(1, self.num_items)
+            self._load_app_icons()
+
+        if scale_changed:
+            self.apply_scale(new_scale)  # Also recomputes sector geometry
+        elif items_changed:
+            self._precompute_geometry()
 
         cursor_pos = QCursor.pos()
         target_x = cursor_pos.x() - self.width() // 2
@@ -596,7 +604,6 @@ def setup(app):
     win = app.window
 
     _KEY_FILTER = PieMenuKeyFilter(win)
-    win._v_menu_key_filter = _KEY_FILTER
 
     # Install filter on the 3D viewport only — avoids capturing V across
     # the whole application and conflicting with other extensions.
@@ -614,7 +621,7 @@ def setup(app):
             _SETTINGS_ACTION = app.add_menu_action(
                 "V Menu Settings...",
                 lambda: open_settings_dialog(win),
-                tip="Configure radial menu scale and size",
+                tip="Configure radial menu scale and tool slots",
             )
         elif hasattr(app, "add_menu"):
             menu = app.add_menu("V Menu")
@@ -660,11 +667,5 @@ def teardown(app):
         if q_app is not None:
             q_app.removeEventFilter(_KEY_FILTER)
         _KEY_FILTER = None
-
-    # Remove the attribute that was stamped onto the window
-    try:
-        del win._v_menu_key_filter
-    except AttributeError:
-        pass
 
     log.info("V Menu unloaded.")

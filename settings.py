@@ -33,7 +33,7 @@ STEP_SCALE_PERCENT = 5
 SETTING_SLOTS_KEY = "v_menu/slots"
 
 # =============================================================================
-# Master Catalog of Available Tools (20 items)
+# Master Catalog of Available Tools (21 items)
 # =============================================================================
 TOOL_CATALOG: dict[str, dict] = {
     "pushpull": {
@@ -222,28 +222,45 @@ DEFAULT_SLOTS = [
 NUM_SLOTS = 10
 
 
+# In-memory cache to avoid querying QSettings on every 'V' keypress
+_cached_scale: float | None = None
+_cached_slots: list[str] | None = None
+
+
 def get_menu_scale() -> float:
     """Return the configured menu scale multiplier as a float (e.g. 1.0 = 100%)."""
+    global _cached_scale
+    if _cached_scale is not None:
+        return _cached_scale
+
     st = QSettings()
     val = st.value(SETTING_SCALE_KEY, DEFAULT_SCALE_PERCENT)
     try:
         pct = int(val)
         if MIN_SCALE_PERCENT <= pct <= MAX_SCALE_PERCENT:
-            return pct / 100.0
+            _cached_scale = pct / 100.0
+            return _cached_scale
     except (ValueError, TypeError):
         pass
-    return DEFAULT_SCALE_PERCENT / 100.0
+    _cached_scale = DEFAULT_SCALE_PERCENT / 100.0
+    return _cached_scale
 
 
 def set_menu_scale(percent: int):
-    """Store the menu scale percentage into QSettings."""
+    """Store the menu scale percentage into QSettings and update cache."""
+    global _cached_scale
     pct = max(MIN_SCALE_PERCENT, min(MAX_SCALE_PERCENT, int(percent)))
+    _cached_scale = pct / 100.0
     st = QSettings()
     st.setValue(SETTING_SCALE_KEY, pct)
 
 
 def get_menu_slots() -> list[str]:
     """Return the list of 10 configured tool keys for the radial menu."""
+    global _cached_slots
+    if _cached_slots is not None:
+        return list(_cached_slots)
+
     st = QSettings()
     raw = st.value(SETTING_SLOTS_KEY, None)
     if raw:
@@ -258,29 +275,26 @@ def get_menu_slots() -> list[str]:
             if isinstance(slots, list) and len(slots) == NUM_SLOTS:
                 valid = [k for k in slots if k in TOOL_CATALOG]
                 if len(valid) == NUM_SLOTS:
-                    return valid
+                    _cached_slots = valid
+                    return list(_cached_slots)
         except Exception:
             pass
-    return list(DEFAULT_SLOTS)
+    _cached_slots = list(DEFAULT_SLOTS)
+    return list(_cached_slots)
 
 
 def set_menu_slots(slots: list[str]):
-    """Store the 10 tool keys for the radial menu into QSettings."""
+    """Store the 10 tool keys for the radial menu into QSettings and update cache."""
+    global _cached_slots
     if len(slots) == NUM_SLOTS:
+        _cached_slots = list(slots)
         st = QSettings()
         st.setValue(SETTING_SLOTS_KEY, json.dumps(slots))
 
 
 def get_pie_items() -> list[dict]:
     """Return the resolved list of tool item dictionaries for the pie menu."""
-    slot_keys = get_menu_slots()
-    items = []
-    for key in slot_keys:
-        if key in TOOL_CATALOG:
-            items.append(TOOL_CATALOG[key])
-        else:
-            items.append(TOOL_CATALOG["pushpull"])
-    return items
+    return [TOOL_CATALOG[key] for key in get_menu_slots()]
 
 
 class VMenuSettingsDialog(QDialog):
@@ -334,7 +348,7 @@ class VMenuSettingsDialog(QDialog):
         reset_size_layout.addWidget(self.reset_size_btn)
         size_layout.addLayout(reset_size_layout)
 
-        self.slider.valueChanged.connect(self._update_value_label)
+        self.slider.valueChanged.connect(self._on_slider_value_changed)
         main_layout.addWidget(size_group)
 
         # ---------------------------------------------------------------------
@@ -404,6 +418,16 @@ class VMenuSettingsDialog(QDialog):
         self.button_box.accepted.connect(self._on_accept)
         self.button_box.rejected.connect(self.reject)
         main_layout.addWidget(self.button_box)
+
+    def _on_slider_value_changed(self, val: int):
+        """Snap slider value to STEP_SCALE_PERCENT (5%) increments even when dragging."""
+        snapped = int(round(val / STEP_SCALE_PERCENT) * STEP_SCALE_PERCENT)
+        snapped = max(MIN_SCALE_PERCENT, min(MAX_SCALE_PERCENT, snapped))
+        if snapped != val:
+            self.slider.blockSignals(True)
+            self.slider.setValue(snapped)
+            self.slider.blockSignals(False)
+        self._update_value_label(snapped)
 
     def _update_value_label(self, val: int):
         if val == DEFAULT_SCALE_PERCENT:
