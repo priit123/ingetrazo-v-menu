@@ -8,7 +8,7 @@ pattern.
 from __future__ import annotations
 
 import json
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -387,6 +387,12 @@ class VMenuSettingsDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(380)
 
+        self._main_win = parent
+        self._preview_widget = None
+        self._preview_hide_timer = QTimer(self)
+        self._preview_hide_timer.setSingleShot(True)
+        self._preview_hide_timer.timeout.connect(self._hide_scale_preview)
+
         current_pct = int(round(get_menu_scale() * 100.0))
         current_slots = get_menu_slots()
         catalog_icons = _resolve_catalog_icons(parent)
@@ -430,6 +436,8 @@ class VMenuSettingsDialog(QDialog):
         reset_size_layout.addWidget(self.reset_size_btn)
         size_layout.addLayout(reset_size_layout)
 
+        self.slider.sliderPressed.connect(self._on_slider_pressed)
+        self.slider.sliderReleased.connect(self._on_slider_released)
         self.slider.valueChanged.connect(self._on_slider_value_changed)
         main_layout.addWidget(size_group)
 
@@ -530,8 +538,18 @@ class VMenuSettingsDialog(QDialog):
 
         self._slot_keys[changed_slot_idx] = new_key
 
+    def _on_slider_pressed(self):
+        """Show radial menu preview beside dialog as soon as the user grabs the slider."""
+        self._preview_hide_timer.stop()
+        self._show_scale_preview(self.slider.value())
+
+    def _on_slider_released(self):
+        """Hide radial menu preview when the user releases the slider."""
+        self._preview_hide_timer.stop()
+        self._hide_scale_preview()
+
     def _on_slider_value_changed(self, val: int):
-        """Snap slider value to STEP_SCALE_PERCENT (5%) increments even when dragging."""
+        """Snap slider value to STEP_SCALE_PERCENT (5%) increments and update live preview."""
         snapped = int(round(val / STEP_SCALE_PERCENT) * STEP_SCALE_PERCENT)
         snapped = max(MIN_SCALE_PERCENT, min(MAX_SCALE_PERCENT, snapped))
         if snapped != val:
@@ -539,6 +557,41 @@ class VMenuSettingsDialog(QDialog):
             self.slider.setValue(snapped)
             self.slider.blockSignals(False)
         self._update_value_label(snapped)
+        self._show_scale_preview(snapped)
+        if not self.slider.isSliderDown():
+            # Changed via keyboard, mouse wheel, or "Reset to 100%" button — auto-hide after brief preview
+            self._preview_hide_timer.start(800)
+
+    def _show_scale_preview(self, scale_pct: int):
+        """Display or update the floating radial menu preview alongside this dialog."""
+        if not self.isVisible():
+            return
+        if self._preview_widget is None:
+            from . import PieMenuWidget
+
+            items = [TOOL_CATALOG[k] for k in self._slot_keys if k in TOOL_CATALOG]
+            self._preview_widget = PieMenuWidget(
+                main_window=self._main_win,
+                items=items,
+                preview_mode=True,
+                parent=self,
+            )
+
+        items = [TOOL_CATALOG[k] for k in self._slot_keys if k in TOOL_CATALOG]
+        self._preview_widget.show_preview_beside(self, scale_pct / 100.0, items)
+
+    def _hide_scale_preview(self):
+        """Hide the floating radial menu preview if active."""
+        if self._preview_widget is not None and self._preview_widget.isVisible():
+            self._preview_widget.hide()
+
+    def done(self, result: int):
+        """Ensure preview overlay is closed when dialog is accepted or rejected."""
+        self._preview_hide_timer.stop()
+        if self._preview_widget is not None:
+            self._preview_widget.close()
+            self._preview_widget = None
+        super().done(result)
 
     def _update_value_label(self, val: int):
         if val == DEFAULT_SCALE_PERCENT:

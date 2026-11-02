@@ -126,14 +126,25 @@ def _draw_fallback_icon(painter: QPainter, center: QPointF, size: float, color: 
 class PieMenuWidget(QWidget):
     """Circular radial menu centered under cursor."""
 
-    def __init__(self, main_window=None, items: list[dict] = None):
+    def __init__(
+        self,
+        main_window=None,
+        items: list[dict] = None,
+        preview_mode: bool = False,
+        parent: QWidget = None,
+    ):
         if callable(main_window):
             main_window = main_window()
         if main_window is None:
             main_window = QApplication.activeWindow()
 
-        super().__init__(main_window, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        flags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+        if preview_mode:
+            flags |= Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus
+
+        super().__init__(parent if parent is not None else main_window, flags)
         self.win = main_window
+        self._preview_mode = preview_mode
         self.items = items if items is not None else get_pie_items()
         self.num_items = len(self.items)
         self.slice_angle = 360.0 / max(1, self.num_items)
@@ -152,7 +163,10 @@ class PieMenuWidget(QWidget):
 
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
-        self.setMouseTracking(True)
+        if preview_mode:
+            self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        else:
+            self.setMouseTracking(True)
 
         # Precompute geometry & resolve tool QActions
         self.apply_scale(get_menu_scale())
@@ -302,9 +316,57 @@ class PieMenuWidget(QWidget):
         self.setFocus()
         self.grabMouse()
 
+    def show_preview_beside(self, anchor_widget: QWidget, scale: float, items: list[dict] = None):
+        """Display non-interactive live scale preview next to anchor_widget (e.g. Settings dialog)."""
+        if items is not None:
+            items_changed = [it["key"] for it in items] != [it["key"] for it in self.items]
+            if items_changed:
+                self.items = items
+                self.num_items = len(self.items)
+                self.slice_angle = 360.0 / max(1, self.num_items)
+                self._resolve_actions()
+                if abs(scale - self.scale_factor) <= 1e-4:
+                    self._precompute_geometry()
+
+        if abs(scale - self.scale_factor) > 1e-4:
+            self.apply_scale(scale)
+
+        # Keep center point stationary based on max scale (1.5x) so menu expands/shrinks smoothly in place
+        max_dim = int(round((BASE_OUTER_RADIUS * 1.5) * 2 + 30.0 * 1.5))
+        max_half = max_dim // 2
+        gap = 20
+
+        frame = anchor_widget.frameGeometry()
+        center_x = frame.right() + gap + max_half
+        center_y = frame.center().y()
+
+        screen = QGuiApplication.screenAt(frame.center()) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            # If not enough space on the right, flip to the left side of the dialog
+            if center_x + max_half > geo.right():
+                left_candidate = frame.left() - gap - max_half
+                if left_candidate - max_half >= geo.left():
+                    center_x = left_candidate
+                else:
+                    center_x = max(geo.left() + self.width() // 2, min(center_x, geo.right() - self.width() // 2))
+            center_y = max(geo.top() + self.height() // 2, min(center_y, geo.bottom() - self.height() // 2))
+
+        target_x = center_x - self.width() // 2
+        target_y = center_y - self.height() // 2
+        self.move(target_x, target_y)
+        self._hovered_index = -1
+
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self.update()
+
     # --- Event Handlers ---
 
     def mouseMoveEvent(self, event):
+        if self._preview_mode:
+            return
         cx = self.width() / 2.0
         cy = self.height() / 2.0
         pos = event.position()
@@ -328,6 +390,8 @@ class PieMenuWidget(QWidget):
             self.update()
 
     def mousePressEvent(self, event):
+        if self._preview_mode:
+            return
         if event.button() == Qt.LeftButton:
             cx = self.width() / 2.0
             cy = self.height() / 2.0
@@ -364,16 +428,18 @@ class PieMenuWidget(QWidget):
         super().keyPressEvent(event)
 
     def focusOutEvent(self, event):
-        self.close()
+        if not self._preview_mode:
+            self.close()
         super().focusOutEvent(event)
 
     def event(self, event):
-        if event.type() == QEvent.WindowDeactivate:
+        if not self._preview_mode and event.type() == QEvent.WindowDeactivate:
             self.close()
         return super().event(event)
 
     def closeEvent(self, event):
-        self.releaseMouse()
+        if not self._preview_mode:
+            self.releaseMouse()
         super().closeEvent(event)
 
     # --- Tool Execution ---
