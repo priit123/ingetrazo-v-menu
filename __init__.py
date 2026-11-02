@@ -152,7 +152,7 @@ class PieMenuWidget(QWidget):
         self.slice_angle = 360.0 / max(1, self.num_items)
 
         self._hovered_index = -1
-        self._icons: dict[str, QIcon] = {}
+        self._actions: dict[str, QAction] = {}
         self.scale_factor = 0.0  # Initialized via apply_scale()
         self.inner_radius = BASE_INNER_RADIUS
         self.outer_radius = BASE_OUTER_RADIUS
@@ -167,9 +167,9 @@ class PieMenuWidget(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setMouseTracking(True)
 
-        # Precompute geometry & load icons
+        # Precompute geometry & resolve tool QActions
         self.apply_scale(get_menu_scale())
-        self._load_app_icons()
+        self._resolve_actions()
 
     def apply_scale(self, scale: float):
         """Update geometry, fonts and canvas size based on scale multiplier."""
@@ -224,27 +224,57 @@ class PieMenuWidget(QWidget):
             rect = QRectF(icon_cx - icon_size / 2.0, icon_cy - icon_size / 2.0, icon_size, icon_size)
             self._icon_rects.append(rect)
 
-    def _load_app_icons(self):
-        """Retrieve official QIcons from IngeTrazo tool or navigation actions.
+    def _resolve_actions(self):
+        """Resolve QAction instances for active menu items via public Qt API.
 
-        NOTE: win._tool_actions and win._nav_actions are used here only for
-        reading existing QIcons. This call is read-only and fails silently.
+        1. First searches win.findChildren(QAction) by matching QKeySequence.
+        2. Falls back to win._tool_actions / win._nav_actions if a user customized
+           their shortcut in IngeTrazo Preferences.
+        Storing the QAction reference directly provides O(1) tool triggering and
+        live icon updates when the user switches dark/light theme at runtime.
         """
+        self._actions.clear()
+        if self.win is None:
+            return
+
+        # Build shortcut -> QAction lookup from public Qt object tree
+        all_actions = self.win.findChildren(QAction)
+        by_seq: dict[QKeySequence, QAction] = {}
+        for act in all_actions:
+            for seq in act.shortcuts():
+                if not seq.isEmpty() and seq not in by_seq:
+                    by_seq[seq] = act
+            sc = act.shortcut()
+            if not sc.isEmpty() and sc not in by_seq:
+                by_seq[sc] = act
+
+        # Optional fallback dicts if the user rebound a tool's default shortcut
         tool_actions = getattr(self.win, "_tool_actions", {}) or {}
         nav_actions = getattr(self.win, "_nav_actions", {}) or {}
+
         for item in self.items:
             key = item["key"]
-            act = tool_actions.get(key) or nav_actions.get(key)
-            if act is not None and not act.icon().isNull():
-                self._icons[key] = act.icon()
+            if key == "delete":
+                continue
+
+            shortcut = item.get("shortcut")
+            qt_key = item.get("qt_key")
+            target_seq = QKeySequence(shortcut) if shortcut else QKeySequence(qt_key)
+
+            act = by_seq.get(target_seq)
+            if act is None:
+                act = tool_actions.get(key) or nav_actions.get(key)
+
+            if act is not None:
+                self._actions[key] = act
 
     def update_items(self, items: list[dict]):
-        """Update items list, recompute sector geometry and reload icons."""
+        """Update items list, recompute sector geometry and resolve QActions."""
         self.items = items
         self.num_items = len(self.items)
         self.slice_angle = 360.0 / max(1, self.num_items)
         self._precompute_geometry()
-        self._load_app_icons()
+        self._resolve_actions()
         self.update()
 
     def show_at_cursor(self):
@@ -259,7 +289,7 @@ class PieMenuWidget(QWidget):
             self.items = new_items
             self.num_items = len(self.items)
             self.slice_angle = 360.0 / max(1, self.num_items)
-            self._load_app_icons()
+            self._resolve_actions()
 
         if scale_changed:
             self.apply_scale(new_scale)  # Also recomputes sector geometry
@@ -382,19 +412,11 @@ class PieMenuWidget(QWidget):
             self._flash(f"Active tool: {name}")
             return
 
-        # Public Qt API: find matching QAction on the main window by shortcut sequence.
-        # This triggers successfully even when toolbars are hidden (Clean Screen mode).
-        triggered = False
-        if self.win is not None:
-            target_seq = QKeySequence(shortcut) if shortcut else QKeySequence(qt_key)
-            for act in self.win.findChildren(QAction):
-                shortcuts = act.shortcuts()
-                if (shortcuts and any(s == target_seq for s in shortcuts)) or act.shortcut() == target_seq:
-                    act.trigger()
-                    triggered = True
-                    break
-
-        if not triggered:
+        # Public Qt API: trigger cached QAction (works even when toolbars are hidden in Clean Screen mode).
+        act = self._actions.get(item["key"])
+        if act is not None:
+            act.trigger()
+        else:
             # Fallback: simulate key press on window/viewport
             shortcut_text = shortcut if len(shortcut) == 1 else ""
             target = self.win if self.win is not None else vp
@@ -475,8 +497,9 @@ class PieMenuWidget(QWidget):
             if item["key"] == "delete":
                 _draw_delete_icon(painter, center_pt, icon_rect.width(), icon_color)
             else:
-                icon = self._icons.get(item["key"])
-                if icon and not icon.isNull():
+                act = self._actions.get(item["key"])
+                icon = act.icon() if act is not None else QIcon()
+                if not icon.isNull():
                     icon.paint(painter, icon_rect.toRect(), Qt.AlignCenter)
                 else:
                     _draw_fallback_icon(painter, center_pt, icon_rect.width(), icon_color)
