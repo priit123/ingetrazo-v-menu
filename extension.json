@@ -1,7 +1,7 @@
 {
   "id": "v_menu",
   "name": "V Menu (Pie Menu)",
-  "version": "0.4",
+  "version": "1.0.0",
   "description": "Pressing 'V' opens a customizable 10-slice circular radial menu under the cursor with user-configurable modeling tools.",
   "author": "priit123",
   "entry": "__init__.py"
