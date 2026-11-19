@@ -67,6 +67,7 @@ _DARK_PALETTE: dict[str, QColor] = {
     "text":       QColor(224, 224, 224),      # #E0E0E0
     "text_dim":   QColor(160, 160, 165),      # Dimmed secondary text
     "text_hover": QColor(255, 255, 255),      # Text on active orange sector
+    "icon":       QColor(202, 205, 210),      # #CACDD2 — matches IngeTrazo dark icons
 }
 
 # Light theme — based on IngeTrazo panel bg #F3F3F3, text #14161A
@@ -78,6 +79,7 @@ _LIGHT_PALETTE: dict[str, QColor] = {
     "text":       QColor(20, 22, 26),         # #14161A
     "text_dim":   QColor(80, 85, 95),         # Dimmed secondary text
     "text_hover": QColor(20, 22, 26),         # Dark text in light theme
+    "icon":       QColor(98, 102, 107),       # #62666B — matches IngeTrazo light icons
 }
 
 
@@ -92,7 +94,7 @@ def _draw_delete_icon(painter: QPainter, center: QPointF, size: float, color: QC
     hs = size / 2.0
     rect = QRectF(center.x() - hs, center.y() - hs, size, size)
 
-    pen = QPen(color, max(1.0, 2.0 * s), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    pen = QPen(color, max(1.0, 1.5 * s), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
 
@@ -566,7 +568,7 @@ class PieMenuWidget(QWidget):
             # Sector content — icon using precomputed positions
             center_pt = self._icon_centers[i]
             icon_rect = self._icon_rects[i]
-            icon_color = pal["text_hover"] if is_hover else pal["text"]
+            icon_color = pal["text_hover"] if is_hover else pal["icon"]
 
             if item["key"] == "delete":
                 _draw_delete_icon(painter, center_pt, icon_rect.width(), icon_color)
